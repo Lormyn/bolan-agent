@@ -54,6 +54,8 @@ graph TD
     ADK -- "Streams Text + Audio + Widgets" --> Browser
 ```
 
+---
+
 ## Model Configuration
 
 The agent uses a custom `AIStudioGemini` LLM class (extending `Gemini`) that forces the Gemini Developer API even if GCP env vars are set:
@@ -66,17 +68,7 @@ The agent uses a custom `AIStudioGemini` LLM class (extending `Gemini`) that for
 
 > **Important**: The `speech_config` must be set on the `Gemini` model instance, not on the Agent's `generate_content_config`. ADK only reads `speech_config` from the model for Live API sessions.
 
-## Monkey Patches
-
-Two monkey patches on `GeminiLlmConnection` (version-guarded for ADK 2.0.x):
-
-### `receive` (line 46–248)
-Handles Gemini 3.1 Live Preview's tool call behavior. Under this model, `turn_complete` is NOT sent when the model issues a tool call — the receive loop must break early on `message.tool_call` to execute the tool immediately. Also handles transcription aggregation, grounding metadata, and session resumption.
-
-### `send_history` (line 272–335)
-Converts multi-turn conversation history into a single-turn text transcript. The Live API's `send_client_content` doesn't support the full history format that non-live sessions use, so we serialize it as a labeled transcript and send as a single user content turn.
-
-Also includes `strip_a2ui_payload()` which removes `a2ui_payload` keys from function responses before including them in the transcript (reduces token usage).
+---
 
 ## Widget Pipeline (A2UI)
 
@@ -104,6 +96,8 @@ The frontend checks 4 delivery paths in `onmessage`:
 | `loan_offer` | `visa_laneerbjudande` | Personalized offer card | Deferred |
 | `addons` | `visa_tillagg` | Add-on option cards | Deferred |
 
+---
+
 ## Rate Calculation Engine
 
 The offered rate is computed by `calculate_offered_rate()` in `mock_data.py`:
@@ -113,21 +107,34 @@ offered_rate = base_rate[binding_period]
              + risk_adjustment[uc_category]
              + ltv_adjustment[ltv_tier]
              + employment_adjustment[employment_type]
-             
+
 Floor: 2.50%
 ```
 
+**Base rates**: 3mo: 3.89%, 1yr: 3.65%, 2yr: 3.45%, 3yr: 3.29%, 5yr: 3.15%
+
+**Adjustments**:
+- UC risk: Very Low −0.15%, Low 0%, Medium +0.25%, High +0.55%
+- LTV: ≤50% −0.10%, ≤70% 0%, ≤85% +0.25%, ≤90% +0.35%
+- Employment: Permanent −0.05%, Self-employed +0.15%, Student +0.40%
+
+Amortization follows Swedish Finansinspektionen rules: 2% for LTV >70%, 1% for LTV 50–70%, 0% below 50%.
+
 This is wired into `visa_laneerbjudande()` in `tools.py`, using session state for risk category, LTV, and employment type.
+
+---
 
 ## AVM Pipeline (5-Phase)
 
-```
-Phase 1: Suppress text (early detect on "valuation" keyword), audio plays through
-Phase 2: Render static announcement bubble ("Thanks for the address...")
-Phase 3: Loading animation with 5 fake progress steps (~7 seconds)
-Phase 4: Render AVM result card (value range ±5%)
-Phase 5: Release suppression + 15s cooldown, prompt model for post-AVM commentary
-```
+The property valuation widget has a specialized rendering pipeline to handle the timing gap between model text/audio and widget arrival:
+
+1. **Early detection** — text containing "valuation"/"värdering" triggers text suppression (audio plays through)
+2. **Static announcement** — frontend renders "Thanks for the address. I will now run an automated valuation..."
+3. **Loading animation** — 5-step progress animation (~7s) with Lantmäteriet/Booli branding
+4. **Result card** — estimated market value rendered as ±5% confidence range
+5. **Release** — suppression cleared, 15s cooldown prevents re-trigger, model prompted for post-AVM commentary
+
+---
 
 ## Audio Synchronization
 
@@ -141,3 +148,26 @@ Key timing rules:
 - Pre-AVM: early detection suppresses text but NOT audio (model's acknowledgment is heard)
 - During AVM: model has completed its turn, no unwanted audio follows
 - Post-AVM: cooldown flag prevents "valuation" in commentary from re-triggering suppression
+
+---
+
+## Monkey Patches
+
+Two monkey patches on `GeminiLlmConnection` (version-guarded for ADK 2.0.x):
+
+### `receive`
+Handles Gemini 3.1 Live Preview's tool call behavior. Under this model, `turn_complete` is NOT sent when the model issues a tool call — the receive loop must break early on `message.tool_call` to execute the tool immediately. Also handles transcription aggregation, grounding metadata, and session resumption.
+
+### `send_history`
+Converts multi-turn conversation history into a single-turn text transcript. The Live API's `send_client_content` doesn't support the full history format that non-live sessions use, so we serialize it as a labeled transcript and send as a single user content turn.
+
+Also includes `strip_a2ui_payload()` which removes `a2ui_payload` keys from function responses before including them in the transcript (reduces token usage).
+
+---
+
+## Debug Mode
+
+Append `?debug` to the URL to enable:
+- Version banner in console
+- Console monkey-patching that captures `[Live]`/`[Voice]`/`[GeminiVoice]` logs
+- Press `Ctrl+Shift+L` to copy debug logs to clipboard

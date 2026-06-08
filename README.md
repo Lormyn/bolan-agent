@@ -34,8 +34,6 @@ open http://localhost:8080
 
 The `start.sh` script starts the ADK API server on port 8000 and the frontend on port 8080. Press `Ctrl+C` to stop both (graceful SIGTERM → SIGKILL fallback).
 
-> **Note**: Both `.env` and `frontend/config.js` are gitignored and will never be committed.
-
 ---
 
 ## Architecture
@@ -188,68 +186,14 @@ Banksy closes the conversation.
 
 ---
 
-## Rate Engine
-
-The offered rate is calculated dynamically by `calculate_offered_rate()` in `mock_data.py`:
-
-- **Base rate** by binding period (3mo: 3.89%, 1yr: 3.65%, 2yr: 3.45%, 3yr: 3.29%, 5yr: 3.15%)
-- **UC risk adjustment** (Very Low: −0.15%, Low: 0%, Medium: +0.25%, High: +0.55%)
-- **LTV adjustment** (≤50%: −0.10%, ≤70%: 0%, ≤85%: +0.25%, ≤90%: +0.35%)
-- **Employment adjustment** (Permanent: −0.05%, Self-employed: +0.15%, Student: +0.40%)
-- **Floor**: 2.50%
-
-Amortization follows Swedish Finansinspektionen rules: 2% for LTV >70%, 1% for LTV 50–70%, 0% below 50%.
-
----
-
-## AVM Pipeline (5-Phase)
-
-The property valuation widget has a specialized rendering pipeline:
-
-1. **Early detection** — text containing "valuation"/"värdering" triggers text suppression (audio plays through)
-2. **Static announcement** — frontend renders "I will now run an automated valuation..."
-3. **Loading animation** — 5-step progress animation (~7s) with Lantmäteriet/Booli branding
-4. **Result card** — estimated market value rendered as ±5% confidence range
-5. **Release** — suppression cleared, 15s cooldown prevents re-trigger, model prompted for commentary
-
----
-
-## Audio Synchronization
-
-Gemini Live API audio chunks arrive **200–800ms after** corresponding text tokens:
-
-- **Pre-AVM**: early detection suppresses text but NOT audio (model's acknowledgment is heard)
-- **During AVM**: model turn is complete, no unwanted audio follows
-- **Financial overview**: audio is buffered during widget render, then replayed after
-- **Welcome flow**: audio is dropped (not buffered) during static BankID flow
-
----
-
-## Monkey Patches
-
-Two monkey patches on `GeminiLlmConnection` (version-guarded for ADK 2.0.x):
-
-1. **`receive`** — handles Gemini 3.1 Live Preview's tool call behavior where `turn_complete` is not sent for tool calls, requiring early break from the receive loop
-2. **`send_history`** — converts multi-turn history into a single-turn text transcript, since the Live API doesn't support multi-turn `send_client_content`
-
----
-
-## Debug Mode
-
-Append `?debug` to the URL to enable:
-- Version banner in console
-- Console monkey-patching that captures `[Live]`/`[Voice]`/`[GeminiVoice]` logs
-- Press `Ctrl+Shift+L` to copy debug logs to clipboard
-
----
-
 ## Key Features
 
 - **Real-time voice** via Gemini Live API with configurable voice (Zephyr)
 - **A2UI widgets** rendered from tool responses (financial overview, AVM, rates, offers, add-ons)
 - **Interactive investment chart** with period switching (1M/3M/YTD/1Y/ALL)
-- **Bilingual** (Swedish/English) with `data-i18n` attribute-based translation
-- **Swedish regulation math** (90% LTV cap, 3-tier amortization, Finansinspektionen rules)
+- **Bilingual** (Swedish/English) with automatic language detection
 - **Dynamic rate calculation** based on risk category, LTV, employment, and binding period
-- **Cross-turn dedup** prevents Live API duplicate text from creating double bubbles
-- **Graceful shutdown** via `start.sh` (SIGTERM → 2s wait → SIGKILL)
+- **Swedish regulation math** (90% LTV cap, 3-tier amortization, Finansinspektionen rules)
+
+For technical deep-dives on the widget pipeline, rate engine, AVM rendering, audio synchronization, and monkey patches, see [docs/architecture.md](docs/architecture.md).
+
